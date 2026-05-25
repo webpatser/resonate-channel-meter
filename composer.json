@@ -1,0 +1,53 @@
+{
+    "name": "webpatser/resonate-channel-meter",
+    "description": "Record billable and observable channel occupancy periods from Resonate webhooks",
+    "keywords": ["resonate", "webhooks", "pusher", "metering", "billing", "laravel"],
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Christoph Kempen",
+            "email": "christoph@downsized.nl"
+        }
+    ],
+    "require": {
+        "php": "^8.5",
+        "illuminate/contracts": "^13.0",
+        "illuminate/database": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/routing": "^13.0",
+        "illuminate/support": "^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Webpatser\\ResonateChannelMeter\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Webpatser\\ResonateChannelMeter\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Webpatser\\ResonateChannelMeter\\ChannelMeterServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
