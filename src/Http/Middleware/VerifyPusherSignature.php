@@ -33,7 +33,15 @@ class VerifyPusherSignature
             throw new HttpException(422, 'Unknown application key');
         }
 
-        $expected = hash_hmac('sha256', $body, (string) ($app['secret'] ?? ''));
+        $secret = (string) ($app['secret'] ?? '');
+
+        if ($secret === '') {
+            // An empty secret would make the HMAC key public knowledge and any
+            // signature trivially forgeable. Refuse rather than verify against ''.
+            throw new HttpException(500, 'Application secret not configured');
+        }
+
+        $expected = hash_hmac('sha256', $body, $secret);
 
         if (! hash_equals($expected, $signature)) {
             throw new HttpException(401, 'Invalid signature');
