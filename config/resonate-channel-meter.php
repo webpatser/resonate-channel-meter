@@ -29,4 +29,43 @@ return [
         // 'presence-call.{id}' => App\Models\Call::class,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Minimum members ("fully occupied" metering)
+    |--------------------------------------------------------------------------
+    |
+    | The default mode (min_members <= 1) records a period for plain room
+    | occupancy: `channel_occupied` opens it, `channel_vacated` closes it.
+    |
+    | Set min_members to 2 (or more) to meter only while the channel is
+    | "fully occupied" — for example, billing a two-party reading only while
+    | both the customer and the consultant are present. In that mode the
+    | handler re-evaluates the live member count (via the bound
+    | MembershipCounter) on every membership event and opens a period when the
+    | count reaches the threshold, closing it when it drops below.
+    |
+    | Member counting needs a MembershipCounter binding. The package ships a
+    | NullMembershipCounter (always 0); a host that wants fully-occupied
+    | metering binds its own, e.g. one backed by webpatser/resonate-roster.
+    |
+    */
+
+    'min_members' => (int) env('CHANNEL_METER_MIN_MEMBERS', 1),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Grace seconds
+    |--------------------------------------------------------------------------
+    |
+    | When the member count drops below `min_members`, keep the open period
+    | running for this many seconds before closing it. If the count climbs
+    | back to the threshold within the window the period continues unbroken;
+    | otherwise it is closed at "dropped-below + grace_seconds". Use this to
+    | absorb brief reconnects, or to give a party a short window to come back
+    | before the meter pauses.
+    |
+    */
+
+    'grace_seconds' => (int) env('CHANNEL_METER_GRACE_SECONDS', 0),
+
 ];

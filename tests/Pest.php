@@ -1,9 +1,20 @@
 <?php
 
 use Illuminate\Testing\TestResponse;
+use Webpatser\ResonateChannelMeter\EventHandler;
 use Webpatser\ResonateChannelMeter\Tests\TestCase;
 
 uses(TestCase::class)->in(__DIR__.'/Feature');
+
+/**
+ * Feed a single webhook event straight to the handler.
+ *
+ * @param  array<string, mixed>  $extra  additional event fields (e.g. user_id)
+ */
+function meterEvent(EventHandler $handler, string $name, string $channel, int $timeMs, array $extra = []): void
+{
+    $handler->handle('app-id', array_merge(['name' => $name, 'channel' => $channel], $extra), $timeMs);
+}
 
 /**
  * Build a Pusher-format webhook body and its signature.

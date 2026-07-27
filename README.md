@@ -111,15 +111,55 @@ Then point the webhooks plugin at that URL:
 
 The middleware verifies the `X-Pusher-Signature` against the app secret in `reverb.apps`, so an unsigned or forged request is rejected with `401`. An unknown `X-Pusher-Key` is rejected with `422`.
 
+## Fully-occupied metering (min members + grace)
+
+By default a period spans plain room occupancy: `channel_occupied` opens it,
+`channel_vacated` closes it. Set `min_members` to `2` (or more) to meter only
+while the channel is **fully occupied** — for example, billing a two-party
+reading only while both the customer and the consultant are present.
+
+In this mode every membership event re-evaluates the live member count, so the
+package needs a way to read it. Bind a `MembershipCounter`; the shipped
+`NullMembershipCounter` always returns 0, so a host that uses
+`webpatser/resonate-roster` typically binds a small adapter over its roster:
+
+```php
+use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
+use Webpatser\ResonateRoster\RoomRoster;
+
+$this->app->singleton(MembershipCounter::class, fn () => new class implements MembershipCounter {
+    public function count(string $channel): int
+    {
+        return (new RoomRoster(config('resonate-roster')))->userCount($channel);
+    }
+});
+```
+
+`grace_seconds` keeps the period open for a window after the count drops below
+the threshold, closing it at `dropped-below + grace` only if the count does not
+recover (it absorbs brief reconnects). Because a channel can simply go quiet
+after dropping below, schedule the backstop sweep:
+
+```php
+// routes/console.php
+Schedule::command('channel-meter:sweep')->everyTenSeconds();
+```
+
+For a live in-progress meter, read the open period plus the `metadata.below_since`
+marker yourself and cap billable time at `below_since + grace`; the sweep then
+persists the same close durably.
+
 ## Configuration reference
 
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `patterns` | `[]` | Channel-to-model patterns. Each maps a channel-name shape with a `{id}` placeholder to an Eloquent model class. |
+| `min_members` | `1` | Members required to keep a period open. `<= 1` is room occupancy; `>= 2` is fully-occupied metering driven by the `MembershipCounter`. |
+| `grace_seconds` | `0` | How long an open period survives below the threshold before closing at `dropped-below + grace`. |
 
 ## Notes and caveats
 
-- **Only occupancy events.** This package processes `channel_occupied` and `channel_vacated`; member and client events are ignored. Build a separate consumer if you want to record them.
+- **Room mode processes only occupancy events.** With `min_members <= 1` the handler records `channel_occupied` / `channel_vacated`; member and client events are ignored. Fully-occupied mode additionally consumes `member_added` / `member_removed` to re-evaluate the count.
 - **Idempotent.** Receiving the same webhook twice never duplicates a period.
 - **`time_ms` comes from the server.** The `started_at` and `ended_at` timestamps are taken from the webhook envelope's `time_ms`, not the receiver's local clock, so a queued retry still records the original moment.
 - **Open periods are excluded from totals.** `totalChannelMeterSeconds()` ignores any period whose `ended_at` is still null. Close stale periods explicitly if you need to bill an in-progress session.

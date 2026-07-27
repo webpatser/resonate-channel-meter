@@ -3,6 +3,8 @@
 namespace Webpatser\ResonateChannelMeter;
 
 use Illuminate\Support\ServiceProvider;
+use Webpatser\ResonateChannelMeter\Console\SweepCommand;
+use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
 use Webpatser\ResonateChannelMeter\Resolvers\ChannelResolver;
 use Webpatser\ResonateChannelMeter\Resolvers\ConfigChannelResolver;
 
@@ -26,6 +28,10 @@ class ChannelMeterServiceProvider extends ServiceProvider
                 (array) $app['config']->get('resonate-channel-meter.patterns', [])
             );
         });
+
+        // The default counter never gates: fully-occupied metering needs a host
+        // to bind a real MembershipCounter (e.g. one backed by the roster).
+        $this->app->bindIf(MembershipCounter::class, NullMembershipCounter::class);
     }
 
     /**
@@ -36,6 +42,8 @@ class ChannelMeterServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         if ($this->app->runningInConsole()) {
+            $this->commands([SweepCommand::class]);
+
             $this->publishes([
                 __DIR__.'/../config/resonate-channel-meter.php' => $this->app->configPath('resonate-channel-meter.php'),
             ], 'resonate-channel-meter-config');
