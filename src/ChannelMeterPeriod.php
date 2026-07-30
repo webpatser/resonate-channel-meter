@@ -21,6 +21,8 @@ use Illuminate\Support\Carbon;
  * @property ?string $model_id
  * @property Carbon $started_at
  * @property ?Carbon $ended_at
+ * @property ?int $open_slot 1 while open, null once closed: the nullable half of the one-open-period-per-channel unique index
+ * @property ?int $last_event_ms the newest event `time_ms` applied to this channel
  * @property ?array<string, mixed> $metadata
  */
 class ChannelMeterPeriod extends Model
@@ -42,6 +44,21 @@ class ChannelMeterPeriod extends Model
             'ended_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    /**
+     * Register the model's events.
+     *
+     * `open_slot` is bookkeeping for the unique index that allows only one
+     * open period per (app_id, channel): it mirrors `ended_at` (1 while open,
+     * null once closed) and is kept in step here so host code that writes a
+     * period directly cannot break the invariant by forgetting it.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $period): void {
+            $period->open_slot = $period->ended_at === null ? 1 : null;
+        });
     }
 
     /**

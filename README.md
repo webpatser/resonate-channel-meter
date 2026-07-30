@@ -161,6 +161,8 @@ persists the same close durably.
 
 - **Room mode processes only occupancy events.** With `min_members <= 1` the handler records `channel_occupied` / `channel_vacated`; member and client events are ignored. Fully-occupied mode additionally consumes `member_added` / `member_removed` to re-evaluate the count.
 - **Idempotent.** Receiving the same webhook twice never duplicates a period.
+- **One open period per channel, enforced by the database.** A unique index on `(app_id, channel, open_slot)` allows any number of closed periods but only one open one, so concurrent or retried deliveries cannot leave a second period open. `open_slot` is bookkeeping (1 while open, null once closed); the model keeps it in step with `ended_at`.
+- **Events older than the newest one applied are dropped.** Each channel carries a `last_event_ms` high-water mark, so a redelivered `channel_occupied` arriving after its `channel_vacated` is ignored rather than opening a phantom period. `ended_at` is also clamped so it can never precede `started_at`.
 - **`time_ms` comes from the server.** The `started_at` and `ended_at` timestamps are taken from the webhook envelope's `time_ms`, not the receiver's local clock, so a queued retry still records the original moment.
 - **Open periods are excluded from totals.** `totalChannelMeterSeconds()` ignores any period whose `ended_at` is still null. Close stale periods explicitly if you need to bill an in-progress session.
 

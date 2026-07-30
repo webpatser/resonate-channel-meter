@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Duplicate open periods under concurrent or retried webhooks.** `open()` did
+  an unlocked check-then-insert, so two deliveries of the same
+  `channel_occupied` (a retry landing while the first delivery was still in
+  flight, or two deliveries picked up by two workers) could both insert a
+  period. The second one stayed open forever, and every roll-up that later
+  closed it billed time the channel was never occupied. There are now two
+  guards: a unique index on `(app_id, channel, open_slot)` and a locked read
+  inside a transaction, with `insertOrIgnore` letting the delivery that loses
+  the race drop out quietly.
+- **Phantom periods from redelivered events.** Events were applied in arrival
+  order, so a `channel_occupied` redelivered after its `channel_vacated`
+  reopened a period nothing would ever close. Each channel now carries a
+  `last_event_ms` high-water mark and events older than the newest one applied
+  to that channel are ignored. Events at the mark itself still apply, since
+  every event in one delivery shares the envelope's `time_ms`.
+- **Negative periods from a late `channel_vacated`.** A delayed vacated could
+  write an `ended_at` before `started_at`, and `totalChannelMeterSeconds()`
+  silently skips such a period, so the whole session vanished from the bill.
+  `ended_at` is now clamped to `started_at`: worst case a zero-length period is
+  recorded, which is visible and bills nothing.
+- **Sweep closing a period that was just reoccupied.** The sweep decided on the
+  periods it had read up front, so a `member_added` arriving mid-sweep could
+  have its reopen overwritten and the session cut short. Each period is now
+  processed in its own transaction and re-read under `lockForUpdate()`, and
+  `evaluate()` locks the period the same way before its read-modify-write of
+  `metadata.below_since`.
+
+### Added
+
+- Migration `2026_07_30_000001_add_open_period_guard_to_channel_meter_periods_table`:
+  adds `open_slot` and `last_event_ms`, then the unique index. `open_slot` is a
+  nullable discriminator (1 while open, null once closed) rather than a partial
+  index or a generated column, because every driver treats NULLs as distinct in
+  a unique index, so the same schema holds on SQLite, MySQL, MariaDB,
+  PostgreSQL, and SQL Server. `ChannelMeterPeriod` keeps `open_slot` in step
+  with `ended_at` on save, so host code writing a period directly cannot break
+  the invariant. The migration also repairs data the old code could already
+  have written: per channel the earliest open period stays open and the
+  duplicates are closed at their own `started_at`, so they bill nothing.
+
 ## [0.2.0] - 2026-06-09
 
 ### Added
