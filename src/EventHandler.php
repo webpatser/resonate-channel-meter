@@ -18,8 +18,8 @@ use Webpatser\ResonateChannelMeter\Support\MeterDecision;
  *   and `channel_vacated` are recorded, one period per occupied stretch.
  * - Fully occupied (min_members >= 2): every membership event re-evaluates the
  *   live member count (from the bound {@see MembershipCounter}) and opens a
- *   period when the channel reaches the threshold, closing it — after an
- *   optional grace window — when it drops below.
+ *   period when the channel reaches the threshold, closing it (after an
+ *   optional grace window) when it drops below.
  *
  * Both modes are idempotent, so a webhook redelivered after a timeout does not
  * duplicate a period or leave an orphan close. Deliveries that race each other

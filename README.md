@@ -115,7 +115,7 @@ The middleware verifies the `X-Pusher-Signature` against the app secret in `reve
 
 By default a period spans plain room occupancy: `channel_occupied` opens it,
 `channel_vacated` closes it. Set `min_members` to `2` (or more) to meter only
-while the channel is **fully occupied** — for example, billing a two-party
+while the channel is **fully occupied**, for example billing a two-party
 reading only while both the customer and the consultant are present.
 
 In this mode every membership event re-evaluates the live member count, so the
