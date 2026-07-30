@@ -46,6 +46,8 @@ class ChannelMeterPeriod extends Model
 
     /**
      * The domain entity the channel maps to, if any.
+     *
+     * @return MorphTo<Model, $this>
      */
     public function model(): MorphTo
     {

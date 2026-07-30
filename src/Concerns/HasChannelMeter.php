@@ -17,6 +17,8 @@ trait HasChannelMeter
 {
     /**
      * Every occupancy period recorded for this model.
+     *
+     * @return MorphMany<ChannelMeterPeriod, $this>
      */
     public function channelMeterPeriods(): MorphMany
     {
@@ -25,6 +27,8 @@ trait HasChannelMeter
 
     /**
      * The periods that are still open right now.
+     *
+     * @return MorphMany<ChannelMeterPeriod, $this>
      */
     public function openChannelMeterPeriods(): MorphMany
     {
@@ -43,6 +47,10 @@ trait HasChannelMeter
         $seconds = 0;
 
         foreach ($this->channelMeterPeriods()->whereNotNull('ended_at')->get() as $period) {
+            if ($period->ended_at === null) {
+                continue;
+            }
+
             $start = $from === null ? $period->started_at : $period->started_at->max($from);
             $end = $to === null ? $period->ended_at : $period->ended_at->min($to);
 
