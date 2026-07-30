@@ -1,0 +1,11 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 3
+
+    paths:
+        - src
+        - database
+
+    tmpDir: build/phpstan

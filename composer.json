@@ -19,6 +19,8 @@
         "illuminate/support": "^13.0"
     },
     "require-dev": {
+        "larastan/larastan": "^3.10",
+        "laravel/pint": "^1.30",
         "orchestra/testbench": "^10.0|^11.0",
         "pestphp/pest": "^4.0"
     },
@@ -40,7 +42,9 @@
         }
     },
     "scripts": {
-        "test": "pest"
+        "test": "pest",
+        "lint": "pint --test",
+        "analyse": "phpstan analyse"
     },
     "config": {
         "sort-packages": true,
