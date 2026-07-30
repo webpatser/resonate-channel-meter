@@ -5,7 +5,10 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-07-30
+
+This is the first published release to contain the fully-occupied metering work
+below, which was developed as 0.2.0 but never tagged.
 
 ### Fixed
 
@@ -51,13 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-06-09
 
+Developed but never tagged; first shipped as part of 0.3.0 above.
+
 ### Added
 
 - Fully-occupied metering mode. With `min_members >= 2`, the `EventHandler`
   re-evaluates the live member count on every membership event
   (`member_added`, `member_removed`, `channel_occupied`, `channel_vacated`)
-  and opens a period only while the channel is at/above the threshold —
-  for example billing a two-party reading only while both parties are present.
+  and opens a period only while the channel is at/above the threshold, for
+  example billing a two-party reading only while both parties are present.
 - `grace_seconds` config: keep an open period running for a window after the
   count drops below the threshold, closing it at `dropped-below + grace` if the
   count does not recover (absorbs brief reconnects). The drop moment is stored
