@@ -54,7 +54,7 @@ class EventHandler
     {
         $channel = $event['channel'] ?? null;
 
-        if (! is_string($channel)) {
+        if (! is_string($channel) || ! $this->meters($channel)) {
             return;
         }
 
@@ -377,6 +377,33 @@ class EventHandler
     protected function minMembers(): int
     {
         return (int) config('resonate-channel-meter.min_members', 1);
+    }
+
+    /**
+     * Determine whether a channel is one this package meters.
+     *
+     * The Pusher protocol reserves "#" for channels the server owns rather than
+     * the application. `webpatser/resonate-users` puts a signed-in connection on
+     * "#server-to-user-{id}" so a message can be addressed to a person, and
+     * that channel is a user's session, not a room. A channel matching no
+     * pattern is still recorded, so without this every sign-in would open a
+     * billable period and every sign-off would close one.
+     */
+    protected function meters(string $channel): bool
+    {
+        /** @var list<string> $prefixes */
+        $prefixes = array_values(array_filter(
+            array_map(strval(...), (array) config('resonate-channel-meter.ignore_channel_prefixes', ['#'])),
+            static fn (string $prefix): bool => $prefix !== '',
+        ));
+
+        foreach ($prefixes as $prefix) {
+            if (str_starts_with($channel, $prefix)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

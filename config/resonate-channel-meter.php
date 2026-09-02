@@ -50,6 +50,26 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Ignored channel prefixes
+    |--------------------------------------------------------------------------
+    |
+    | Events for channels whose name starts with one of these are dropped
+    | before they reach the store, so no period is ever opened for them.
+    |
+    | The Pusher protocol reserves "#" for channels the server owns rather than
+    | the application. webpatser/resonate-users puts a signed-in connection on
+    | "#server-to-user-{id}" so a message can be addressed to a person; that is
+    | a user's session, not a room. A channel matching no pattern is still
+    | recorded, so without this every sign-in would open a billable period.
+    |
+    | Set it to an empty array to meter everything.
+    |
+    */
+
+    'ignore_channel_prefixes' => ['#'],
+
     'min_members' => (int) env('CHANNEL_METER_MIN_MEMBERS', 1),
 
     /*

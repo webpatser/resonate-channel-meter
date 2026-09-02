@@ -5,6 +5,16 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ignore_channel_prefixes` (default `['#']`): events for channels starting with one of these are dropped before they reach the store.
+
+### Fixed
+
+- Stop metering the channels the Pusher protocol reserves with `#`. `webpatser/resonate-users` subscribes a signed-in connection to `#server-to-user-{id}`, and a channel matching no pattern is still recorded, so every sign-in opened a billable period and every sign-off closed one for what is really a user's session. Set the new key to an empty array to get the old behaviour back.
+
 ## [0.3.1] - 2026-09-02
 
 ### Fixed

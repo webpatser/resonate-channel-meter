@@ -155,6 +155,7 @@ persists the same close durably.
 |-----|---------|---------|
 | `patterns` | `[]` | Channel-to-model patterns. Each maps a channel-name shape with a `{id}` placeholder to an Eloquent model class. |
 | `min_members` | `1` | Members required to keep a period open. `<= 1` is room occupancy; `>= 2` is fully-occupied metering driven by the `MembershipCounter`. |
+| `ignore_channel_prefixes` | `['#']` | Channel prefixes never metered. The protocol reserves `#` for channels the server owns, such as the `#server-to-user-{id}` channels `webpatser/resonate-users` creates; a channel matching no pattern is still recorded, so without this a sign-in would open a billable period. |
 | `grace_seconds` | `0` | How long an open period survives below the threshold before closing at `dropped-below + grace`. |
 
 ## Notes and caveats

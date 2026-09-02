@@ -69,3 +69,39 @@ it('ignores non-occupancy event types', function () {
 
     expect(ChannelMeterPeriod::count())->toBe(0);
 });
+
+it('does not meter a reserved channel', function () {
+    // The Pusher protocol reserves "#" for channels the server owns rather than
+    // the application. webpatser/resonate-users puts a signed-in connection on
+    // "#server-to-user-{id}", which is a person's session and not a room. A
+    // channel matching no pattern is still recorded, so without the exclusion
+    // every sign-in would open a billable period.
+    $handler = app(EventHandler::class);
+    $base = 1_700_000_000_000;
+
+    meterEvent($handler, 'channel_occupied', '#server-to-user-42', $base);
+    meterEvent($handler, 'channel_vacated', '#server-to-user-42', $base + 5_000);
+
+    expect(ChannelMeterPeriod::count())->toBe(0);
+});
+
+it('still meters an ordinary channel while reserved ones are ignored', function () {
+    $handler = app(EventHandler::class);
+    $base = 1_700_000_000_000;
+
+    meterEvent($handler, 'channel_occupied', '#server-to-user-42', $base);
+    meterEvent($handler, 'channel_occupied', 'presence-chat.42', $base);
+
+    expect(ChannelMeterPeriod::count())->toBe(1)
+        ->and(ChannelMeterPeriod::query()->value('channel'))->toBe('presence-chat.42');
+});
+
+it('meters everything when the exclusion list is emptied', function () {
+    config()->set('resonate-channel-meter.ignore_channel_prefixes', []);
+
+    $handler = app(EventHandler::class);
+
+    meterEvent($handler, 'channel_occupied', '#server-to-user-42', 1_700_000_000_000);
+
+    expect(ChannelMeterPeriod::count())->toBe(1);
+});
