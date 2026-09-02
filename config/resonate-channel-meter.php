@@ -38,7 +38,7 @@ return [
     | occupancy: `channel_occupied` opens it, `channel_vacated` closes it.
     |
     | Set min_members to 2 (or more) to meter only while the channel is
-    | "fully occupied" — for example, billing a two-party reading only while
+    | "fully occupied": for example, billing a two-party reading only while
     | both the customer and the consultant are present. In that mode the
     | handler re-evaluates the live member count (via the bound
     | MembershipCounter) on every membership event and opens a period when the

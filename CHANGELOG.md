@@ -5,6 +5,12 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Removed the em dash the 0.3.0 doc sweep missed, in the `min_members` block of the published config.
+
 ## [0.3.0] - 2026-07-30
 
 This is the first published release to contain the fully-occupied metering work
