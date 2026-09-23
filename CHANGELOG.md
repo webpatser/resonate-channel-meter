@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stop metering the channels the Pusher protocol reserves with `#`. `webpatser/resonate-users` subscribes a signed-in connection to `#server-to-user-{id}`, and a channel matching no pattern is still recorded, so every sign-in opened a billable period and every sign-off closed one for what is really a user's session. Set the new key to an empty array to get the old behaviour back.
 
+## [0.7.0] - 2026-09-23
+
+### Changed
+
+- Versioning now tracks `webpatser/resonate`'s minor version: `0.7.x` targets resonate 0.7. No code changes; `resonate-channel-meter` has no dependency on `webpatser/resonate` or any sibling plugin.
+
 ## [0.3.1] - 2026-09-02
 
 ### Fixed
