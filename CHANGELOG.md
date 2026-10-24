@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ignore_channel_prefixes` (default `['#']`): events for channels starting with one of these are dropped before they reach the store.
 
+### Changed
+
+- Webhook bodies must now carry a `time_ms` within `timestamp_window` seconds (default 300, env `CHANNEL_METER_TIMESTAMP_WINDOW`) of now, checked after the signature, so captured deliveries cannot be replayed. Missing, stale or future values get a 422. Set it to `0` to disable. Senders that retry for longer than the window (see `resonate-webhooks` backoff) need a larger value.
+
 ### Fixed
 
 - Stop metering the channels the Pusher protocol reserves with `#`. `webpatser/resonate-users` subscribes a signed-in connection to `#server-to-user-{id}`, and a channel matching no pattern is still recorded, so every sign-in opened a billable period and every sign-off closed one for what is really a user's session. Set the new key to an empty array to get the old behaviour back.

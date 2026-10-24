@@ -14,14 +14,16 @@ it('records an occupancy period from a signed webhook delivery', function () {
 });
 
 it('opens then closes a period across two deliveries', function () {
+    $base = (int) (microtime(true) * 1000) - 60_000;
+
     $open = signedWebhook(
         [['name' => 'channel_occupied', 'channel' => 'presence-chat.42']],
-        timeMs: 1_700_000_000_000,
+        timeMs: $base,
     );
 
     $close = signedWebhook(
         [['name' => 'channel_vacated', 'channel' => 'presence-chat.42']],
-        timeMs: 1_700_000_060_000,
+        timeMs: $base + 60_000,
     );
 
     postSignedWebhook($this, $open['body'], $open['signature'])->assertOk();

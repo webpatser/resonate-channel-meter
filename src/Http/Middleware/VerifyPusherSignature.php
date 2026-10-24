@@ -47,9 +47,37 @@ class VerifyPusherSignature
             throw new HttpException(401, 'Invalid signature');
         }
 
+        $this->assertFresh($body);
+
         $request->attributes->set('resonate.app', $app);
 
         return $next($request);
+    }
+
+    /**
+     * Reject a correctly signed body whose `time_ms` is missing or outside the
+     * freshness window, so a captured delivery cannot be replayed later.
+     *
+     * Runs after the signature check, so the timestamp is authentic.
+     */
+    protected function assertFresh(string $body): void
+    {
+        $window = (int) config('resonate-channel-meter.timestamp_window', 300);
+
+        if ($window <= 0) {
+            return;
+        }
+
+        $decoded = json_decode($body, true);
+        $timeMs = is_array($decoded) ? ($decoded['time_ms'] ?? null) : null;
+
+        if (! is_int($timeMs) && ! is_float($timeMs)) {
+            throw new HttpException(422, 'Missing timestamp');
+        }
+
+        if (abs(microtime(true) * 1000 - $timeMs) > $window * 1000) {
+            throw new HttpException(422, 'Stale timestamp');
+        }
     }
 
     /**

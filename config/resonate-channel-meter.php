@@ -70,6 +70,20 @@ return [
 
     'ignore_channel_prefixes' => ['#'],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Webhook timestamp window
+    |--------------------------------------------------------------------------
+    |
+    | A correctly signed webhook body must carry a `time_ms` within this many
+    | seconds of now, otherwise it is rejected with 422. This stops a captured
+    | delivery from being replayed later to open or close periods. Set it to 0
+    | to disable the check. Keep it above the sender's retry backoff.
+    |
+    */
+
+    'timestamp_window' => (int) env('CHANNEL_METER_TIMESTAMP_WINDOW', 300),
+
     'min_members' => (int) env('CHANNEL_METER_MIN_MEMBERS', 1),
 
     /*
