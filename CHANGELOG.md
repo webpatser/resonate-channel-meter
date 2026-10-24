@@ -5,6 +5,14 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-10-24
+
+Stable release for `webpatser/resonate` 1.0. There are no API, config or schema changes since 0.7.1. See `UPGRADE.md`.
+
+### Changed
+
+- Versioning now tracks `webpatser/resonate` 1.0. The package still has no Composer dependency on `webpatser/resonate` or any sibling plugin.
+
 ## [0.7.1] - 2026-10-24
 
 ### Added
@@ -107,6 +115,16 @@ Developed but never tagged; first shipped as part of 0.3.0 above.
 - Room-occupancy mode (`min_members <= 1`, the default) behaves exactly as in
   0.1.0: `channel_occupied` opens, `channel_vacated` closes.
 
+## [0.1.1] - 2026-07-02
+
+### Fixed
+
+- Reject webhook signature verification when the app secret is empty, instead of coercing the secret to an empty string.
+
+### Changed
+
+- Add a CI workflow for tests and a dependency audit.
+
 ## [0.1.0] - 2026-05-25
 
 Initial release.
@@ -132,6 +150,10 @@ Initial release.
 - Migration for the `channel_meter_periods` table, publishable via
   `vendor:publish --tag=resonate-channel-meter-migrations`.
 
-[Unreleased]: https://github.com/webpatser/resonate-channel-meter/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.1.0...v0.2.0
+[1.0.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.7.1...v1.0.0
+[0.7.1]: https://github.com/webpatser/resonate-channel-meter/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.3.1...v0.7.0
+[0.3.1]: https://github.com/webpatser/resonate-channel-meter/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.1.1...v0.3.0
+[0.1.1]: https://github.com/webpatser/resonate-channel-meter/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/webpatser/resonate-channel-meter/releases/tag/v0.1.0
