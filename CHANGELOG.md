@@ -5,6 +5,16 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-10-25
+
+### Fixed
+
+- **A lost `member_removed` no longer leaves a period billing.** The sweep only looked at periods that already carried `metadata.below_since`, so when the `member_removed` webhook never arrived (delivery gave up after its retries, the sender crashed with the event still queued, a wrong webhook URL) the period stayed open with no marker and nothing ever closed it. `EventHandler::sweep()` (`channel-meter:sweep`) now re-evaluates every open period against the bound `MembershipCounter` through the same `MeterDecision` the webhook path uses: a count under `min_members` with no marker sets `below_since` to the sweep moment, and the normal grace close follows (at once when `grace_seconds` is `0`). A count at or above the threshold leaves the period untouched. A `member_removed` that does arrive later keeps the sweep's marker, so the two paths stay idempotent with each other.
+
+### Upgrading
+
+No API, config or schema changes. In fully-occupied mode (`min_members >= 2`) the sweep now reads the live count for every open period, not only the ones already below the threshold, so the bound `MembershipCounter` must see the members of every metered channel: a period it reports under the threshold is closed at `sweep + grace_seconds`, even if no webhook said anyone left. A host still on `NullMembershipCounter` never opens a fully-occupied period through the handler, but any period it opened itself is now closed by the sweep.
+
 ## [1.0.0] - 2026-10-24
 
 Stable release for `webpatser/resonate` 1.0. There are no API, config or schema changes since 0.7.1. See `UPGRADE.md`.
@@ -150,6 +160,7 @@ Initial release.
 - Migration for the `channel_meter_periods` table, publishable via
   `vendor:publish --tag=resonate-channel-meter-migrations`.
 
+[1.0.1]: https://github.com/webpatser/resonate-channel-meter/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.7.1...v1.0.0
 [0.7.1]: https://github.com/webpatser/resonate-channel-meter/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/webpatser/resonate-channel-meter/compare/v0.3.1...v0.7.0

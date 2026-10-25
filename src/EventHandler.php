@@ -87,13 +87,21 @@ class EventHandler
     }
 
     /**
-     * Close any open periods whose grace window has elapsed.
+     * Reconcile every open period against the live member count.
      *
      * The handler closes periods as membership events arrive, but if a channel
      * simply goes quiet after dropping below the threshold (no further webhook)
      * the open period would dangle. A periodic sweep is the backstop. It
      * re-checks the live count first, so a member who returned without a
      * delivered event keeps the period open.
+     *
+     * It also covers a `member_removed` that never arrived (delivery gave up,
+     * the sender crashed with the event queued, a wrong webhook URL): an open
+     * period with no below-threshold marker whose live count is under the
+     * threshold is marked below as of the sweep, so the normal grace close
+     * follows instead of the period running on until the next event. Every
+     * period goes through the same {@see MeterDecision} the webhook path uses,
+     * so the two paths are idempotent with each other.
      *
      * Each period is handled in its own transaction and re-read under
      * `lockForUpdate()`, so a `member_added` that lands while the sweep is
@@ -139,7 +147,11 @@ class EventHandler
     }
 
     /**
-     * Close one swept period if its grace window really has elapsed.
+     * Re-evaluate one swept period against its channel's live member count.
+     *
+     * Back at the threshold clears a below-threshold marker; under it with no
+     * marker sets one as of `$now` (a lost `member_removed`); under it past the
+     * grace deadline closes the period at that deadline.
      *
      * @return bool whether the period was closed
      */
@@ -154,26 +166,23 @@ class EventHandler
                 return;
             }
 
-            $belowSince = $this->belowSince($period);
+            $decision = MeterDecision::for(
+                isOpen: true,
+                belowSince: $this->belowSince($period),
+                memberCount: $this->counter->count($period->channel),
+                minMembers: $this->minMembers(),
+                graceSeconds: $grace,
+                now: $now,
+            );
 
-            if ($belowSince === null) {
-                return;
-            }
+            match ($decision->action) {
+                MeterAction::MarkBelowSince => $this->setBelowSince($period, $now),
+                MeterAction::ClearBelowSince => $this->setBelowSince($period, null),
+                MeterAction::ClosePeriod => $this->closePeriod($period, $decision->endedAt ?? $now),
+                MeterAction::OpenPeriod, MeterAction::NoOp => null,
+            };
 
-            if ($this->counter->count($period->channel) >= $this->minMembers()) {
-                $this->setBelowSince($period, null);
-
-                return;
-            }
-
-            $deadline = $belowSince->copy()->addSeconds($grace);
-
-            if ($now < $deadline) {
-                return;
-            }
-
-            $this->closePeriod($period, $deadline);
-            $closed = true;
+            $closed = $decision->action === MeterAction::ClosePeriod;
         });
 
         return $closed;

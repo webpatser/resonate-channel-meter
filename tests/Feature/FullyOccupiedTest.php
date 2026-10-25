@@ -94,6 +94,70 @@ it('sweeps a dangling period closed once grace has elapsed', function () {
         ->and(ChannelMeterPeriod::sole()->ended_at->getTimestampMs())->toBe($this->base + 40_000);
 });
 
+it('sweep marks a period below when member_removed was lost, then closes it at the deadline', function () {
+    $this->counter->set($this->channel, 2);
+    meterEvent($this->handler, 'member_added', $this->channel, $this->base);
+
+    $this->counter->set($this->channel, 1); // a member left, but no event delivered
+
+    $closed = $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    $period = ChannelMeterPeriod::sole();
+    expect($closed)->toBe(0)
+        ->and($period->ended_at)->toBeNull()
+        ->and(Carbon::parse($period->metadata['below_since'])->getTimestampMs())->toBe($this->base + 60_000);
+
+    expect($this->handler->sweep(Carbon::createFromTimestampMs($this->base + 89_000)))->toBe(0)
+        ->and(ChannelMeterPeriod::sole()->ended_at)->toBeNull();
+
+    $closed = $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 95_000));
+
+    $period = ChannelMeterPeriod::sole();
+    expect($closed)->toBe(1)
+        ->and($period->ended_at->getTimestampMs())->toBe($this->base + 90_000) // sweep mark + 30s grace
+        ->and($period->metadata)->toBeNull();
+});
+
+it('sweep leaves a fully occupied period without below_since untouched', function () {
+    $this->counter->set($this->channel, 2);
+    meterEvent($this->handler, 'member_added', $this->channel, $this->base);
+
+    $closed = $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    $period = ChannelMeterPeriod::sole();
+    expect($closed)->toBe(0)
+        ->and($period->ended_at)->toBeNull()
+        ->and($period->metadata)->toBeNull();
+});
+
+it('sweep closes a period at once when member_removed was lost and grace is zero', function () {
+    config()->set('resonate-channel-meter.grace_seconds', 0);
+
+    $this->counter->set($this->channel, 2);
+    meterEvent($this->handler, 'member_added', $this->channel, $this->base);
+
+    $this->counter->set($this->channel, 1);
+
+    $closed = $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    expect($closed)->toBe(1)
+        ->and(ChannelMeterPeriod::sole()->ended_at->getTimestampMs())->toBe($this->base + 60_000);
+});
+
+it('a late member_removed after the sweep marked the period keeps the sweep marker', function () {
+    $this->counter->set($this->channel, 2);
+    meterEvent($this->handler, 'member_added', $this->channel, $this->base);
+
+    $this->counter->set($this->channel, 1);
+    $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    meterEvent($this->handler, 'member_removed', $this->channel, $this->base + 70_000);
+
+    $period = ChannelMeterPeriod::sole();
+    expect($period->ended_at)->toBeNull()
+        ->and(Carbon::parse($period->metadata['below_since'])->getTimestampMs())->toBe($this->base + 60_000);
+});
+
 it('sweep clears below_since instead of closing when the member returned', function () {
     $this->counter->set($this->channel, 2);
     meterEvent($this->handler, 'member_added', $this->channel, $this->base);

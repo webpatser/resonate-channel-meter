@@ -138,7 +138,10 @@ $this->app->singleton(MembershipCounter::class, fn () => new class implements Me
 `grace_seconds` keeps the period open for a window after the count drops below
 the threshold, closing it at `dropped-below + grace` only if the count does not
 recover (it absorbs brief reconnects). Because a channel can simply go quiet
-after dropping below, schedule the backstop sweep:
+after dropping below, or the `member_removed` webhook can be lost altogether,
+schedule the backstop sweep. It re-evaluates every open period against the live
+count: one under the threshold without a marker is marked below as of the sweep,
+and one past its grace deadline is closed at that deadline.
 
 ```php
 // routes/console.php

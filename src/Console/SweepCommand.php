@@ -9,9 +9,11 @@ use Webpatser\ResonateChannelMeter\EventHandler;
  * Closes fully-occupied periods whose grace window has elapsed.
  *
  * The {@see EventHandler} pauses the meter as membership events arrive, but a
- * channel that goes quiet after dropping below the threshold leaves its period
- * open until the next webhook. Schedule this command (every few seconds) as the
- * backstop that durably closes those periods.
+ * channel that goes quiet after dropping below the threshold, or whose
+ * `member_removed` webhook was lost, leaves its period open until the next
+ * webhook. Schedule this command (every few seconds) as the backstop that
+ * re-evaluates every open period against the live count and durably closes
+ * those that stayed below the threshold past their grace window.
  */
 class SweepCommand extends Command
 {
