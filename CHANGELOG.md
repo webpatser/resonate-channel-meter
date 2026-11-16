@@ -5,6 +5,13 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The out-of-order guard keeps its high-water mark in the new `channel_meter_marks` table (the migration seeds it from existing periods) and checks, applies and marks in one transaction, so a late `channel_occupied` after `channel_vacated` on a fresh channel no longer opens a period that never closes.
+
+
 ## [1.0.1] - 2026-10-25
 
 ### Fixed

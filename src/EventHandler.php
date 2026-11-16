@@ -2,6 +2,7 @@
 
 namespace Webpatser\ResonateChannelMeter;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
@@ -25,7 +26,8 @@ use Webpatser\ResonateChannelMeter\Support\MeterDecision;
  * duplicate a period or leave an orphan close. Deliveries that race each other
  * are held apart by the unique index on (app_id, channel, open_slot) plus a
  * locked read inside a transaction, and deliveries that arrive out of order are
- * dropped against the channel's `last_event_ms` high-water mark.
+ * dropped against the channel's high-water mark in `channel_meter_marks`, whose
+ * row is locked for the whole check, apply and mark of each event.
  */
 class EventHandler
 {
@@ -62,28 +64,56 @@ class EventHandler
         $name = $event['name'] ?? null;
 
         if ($this->minMembers() <= 1) {
-            if (! in_array($name, self::OCCUPANCY_EVENTS, true) || $this->isStale($appId, $channel, $timeMs)) {
+            if (! in_array($name, self::OCCUPANCY_EVENTS, true)) {
                 return;
             }
 
-            if ($name === 'channel_occupied') {
-                $this->open($appId, $channel, $at);
-            } else {
-                $this->close($appId, $channel, $at);
+            $this->inOrder($appId, $channel, $timeMs, function () use ($appId, $channel, $at, $name): void {
+                if ($name === 'channel_occupied') {
+                    $this->open($appId, $channel, $at);
+                } else {
+                    $this->close($appId, $channel, $at);
+                }
+            });
+
+            return;
+        }
+
+        if (! in_array($name, self::MEMBERSHIP_EVENTS, true)) {
+            return;
+        }
+
+        // The live count can be a network call, so it is read before the
+        // channel's mark row is locked rather than while holding it.
+        $memberCount = $this->counter->count($channel);
+
+        $this->inOrder($appId, $channel, $timeMs, function () use ($appId, $channel, $at, $memberCount): void {
+            $this->evaluate($appId, $channel, $at, $memberCount);
+        });
+    }
+
+    /**
+     * Apply an event only if it is not older than the newest one applied.
+     *
+     * The channel's mark row is locked first and held for the whole
+     * transaction, so the stale check, the apply and the mark update cannot
+     * interleave with another delivery for the same channel.
+     *
+     * @param  callable(): void  $apply
+     */
+    protected function inOrder(string $appId, string $channel, int $timeMs, callable $apply): void
+    {
+        DB::transaction(function () use ($appId, $channel, $timeMs, $apply): void {
+            $this->lockMark($appId, $channel);
+
+            if ($this->isStale($appId, $channel, $timeMs)) {
+                return;
             }
 
+            $apply();
+
             $this->markApplied($appId, $channel, $timeMs);
-
-            return;
-        }
-
-        if (! in_array($name, self::MEMBERSHIP_EVENTS, true) || $this->isStale($appId, $channel, $timeMs)) {
-            return;
-        }
-
-        $this->evaluate($appId, $channel, $at);
-
-        $this->markApplied($appId, $channel, $timeMs);
+        });
     }
 
     /**
@@ -191,14 +221,12 @@ class EventHandler
     /**
      * Re-evaluate one channel's metering against its live member count.
      *
-     * The member count is read first (it can be a network call), then the
-     * period is locked and re-read so the read-modify-write of the
+     * The member count is read by the caller (it can be a network call), then
+     * the period is locked and re-read so the read-modify-write of the
      * below-threshold marker cannot be lost to a concurrent delivery.
      */
-    protected function evaluate(string $appId, string $channel, Carbon $at): void
+    protected function evaluate(string $appId, string $channel, Carbon $at, int $memberCount): void
     {
-        $memberCount = $this->counter->count($channel);
-
         DB::transaction(function () use ($appId, $channel, $at, $memberCount): void {
             $open = $this->openPeriod($appId, $channel, lock: true);
 
@@ -279,16 +307,39 @@ class EventHandler
     }
 
     /**
-     * The most recent period recorded for a channel, open or closed.
+     * Lock a channel's high-water mark row, creating it on first sight.
+     *
+     * Two first events for the same channel can both find no row; the
+     * unique index on (app_id, channel) lets exactly one insert land and
+     * `insertOrIgnore` drops the other, after which both lock the one row.
      */
-    protected function latestPeriod(string $appId, string $channel): ?ChannelMeterPeriod
+    protected function lockMark(string $appId, string $channel): ChannelMeterMark
     {
-        return ChannelMeterPeriod::query()
+        $mark = $this->markQuery($appId, $channel)->lockForUpdate()->first();
+
+        if ($mark !== null) {
+            return $mark;
+        }
+
+        ChannelMeterMark::query()->insertOrIgnore([
+            'app_id' => $appId,
+            'channel' => $channel,
+            'last_event_ms' => null,
+        ]);
+
+        return $this->markQuery($appId, $channel)->lockForUpdate()->firstOrFail();
+    }
+
+    /**
+     * A query for one channel's high-water mark row.
+     *
+     * @return Builder<ChannelMeterMark>
+     */
+    protected function markQuery(string $appId, string $channel): Builder
+    {
+        return ChannelMeterMark::query()
             ->where('app_id', $appId)
-            ->where('channel', $channel)
-            ->orderByDesc('started_at')
-            ->orderByDesc('id')
-            ->first();
+            ->where('channel', $channel);
     }
 
     /**
@@ -301,12 +352,16 @@ class EventHandler
      * period before it started. Events at the high-water mark itself still
      * apply: the open/close paths are idempotent, and `time_ms` is shared by
      * every event in one delivery.
+     *
+     * The mark lives in `channel_meter_marks`, not on a period, so it exists
+     * before the channel's first period does. Called with the mark row
+     * already locked by {@see inOrder()}.
      */
     protected function isStale(string $appId, string $channel, int $timeMs): bool
     {
-        $applied = $this->latestPeriod($appId, $channel)?->last_event_ms;
+        $applied = $this->markQuery($appId, $channel)->value('last_event_ms');
 
-        return $applied !== null && $timeMs < $applied;
+        return $applied !== null && $timeMs < (int) $applied;
     }
 
     /**
@@ -314,13 +369,9 @@ class EventHandler
      */
     protected function markApplied(string $appId, string $channel, int $timeMs): void
     {
-        $period = $this->latestPeriod($appId, $channel);
-
-        if ($period === null || ($period->last_event_ms !== null && $period->last_event_ms >= $timeMs)) {
-            return;
-        }
-
-        $period->update(['last_event_ms' => $timeMs]);
+        $this->markQuery($appId, $channel)
+            ->where(fn ($query) => $query->whereNull('last_event_ms')->orWhere('last_event_ms', '<', $timeMs))
+            ->update(['last_event_ms' => $timeMs]);
     }
 
     /**
