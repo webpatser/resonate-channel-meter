@@ -5,6 +5,7 @@ use Webpatser\ResonateChannelMeter\ChannelMeterPeriod;
 use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
 use Webpatser\ResonateChannelMeter\EventHandler;
 use Webpatser\ResonateChannelMeter\Tests\Support\FakeMembershipCounter;
+use Webpatser\ResonateChannelMeter\Tests\Support\LegacyFakeMembershipCounter;
 use Webpatser\ResonateChannelMeter\Tests\Support\TestChat;
 
 beforeEach(function () {
@@ -155,6 +156,58 @@ it('a late member_removed after the sweep marked the period keeps the sweep mark
 
     $period = ChannelMeterPeriod::sole();
     expect($period->ended_at)->toBeNull()
+        ->and(Carbon::parse($period->metadata['below_since'])->getTimestampMs())->toBe($this->base + 60_000);
+});
+
+it('counts members per application, not across apps sharing a channel name', function () {
+    // Another application has the same channel name fully occupied; this
+    // application's channel has one member and must not open a period.
+    $this->counter->set($this->channel, 2, 'other-app');
+    $this->counter->set($this->channel, 1, 'app-id');
+
+    $this->handler->handle('app-id', ['name' => 'member_added', 'channel' => $this->channel], $this->base);
+    $this->handler->handle('other-app', ['name' => 'member_added', 'channel' => $this->channel], $this->base);
+
+    expect(ChannelMeterPeriod::query()->where('app_id', 'app-id')->count())->toBe(0)
+        ->and(ChannelMeterPeriod::query()->where('app_id', 'other-app')->count())->toBe(1);
+});
+
+it('sweep reads each period\'s own application count', function () {
+    $this->counter->set($this->channel, 2, 'app-id');
+    $this->counter->set($this->channel, 2, 'other-app');
+
+    $this->handler->handle('app-id', ['name' => 'member_added', 'channel' => $this->channel], $this->base);
+    $this->handler->handle('other-app', ['name' => 'member_added', 'channel' => $this->channel], $this->base);
+
+    // A member left this application's channel without a delivered event;
+    // the other application's channel of the same name is still full.
+    $this->counter->set($this->channel, 1, 'app-id');
+
+    $this->handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    $mine = ChannelMeterPeriod::query()->where('app_id', 'app-id')->sole();
+    $theirs = ChannelMeterPeriod::query()->where('app_id', 'other-app')->sole();
+
+    expect($mine->metadata['below_since'] ?? null)->not->toBeNull()
+        ->and(Carbon::parse($mine->metadata['below_since'])->getTimestampMs())->toBe($this->base + 60_000)
+        ->and($theirs->metadata)->toBeNull();
+});
+
+it('still works with a legacy counter that receives only the channel', function () {
+    $legacy = new LegacyFakeMembershipCounter;
+    $this->app->instance(MembershipCounter::class, $legacy);
+    $handler = app(EventHandler::class);
+
+    $legacy->set($this->channel, 2);
+    meterEvent($handler, 'member_added', $this->channel, $this->base);
+
+    $legacy->set($this->channel, 1);
+    $handler->sweep(Carbon::createFromTimestampMs($this->base + 60_000));
+
+    $period = ChannelMeterPeriod::sole();
+
+    expect($legacy->calls)->toBe([[$this->channel], [$this->channel]])
+        ->and($period->ended_at)->toBeNull()
         ->and(Carbon::parse($period->metadata['below_since'])->getTimestampMs())->toBe($this->base + 60_000);
 });
 

@@ -5,6 +5,7 @@ namespace Webpatser\ResonateChannelMeter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Webpatser\ResonateChannelMeter\Contracts\AppScopedMembershipCounter;
 use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
 use Webpatser\ResonateChannelMeter\Resolvers\ChannelResolver;
 use Webpatser\ResonateChannelMeter\Support\MeterAction;
@@ -38,13 +39,59 @@ class EventHandler
     private const OCCUPANCY_EVENTS = ['channel_occupied', 'channel_vacated'];
 
     /**
+     * The bound member counter, of either contract.
+     */
+    protected MembershipCounter|AppScopedMembershipCounter $counter;
+
+    /**
      * Create a new event handler.
+     *
+     * The container cannot autowire a union type, so when no counter is
+     * passed the one bound under `MembershipCounter::class` is used; that key
+     * may hold either a {@see MembershipCounter} or an
+     * {@see AppScopedMembershipCounter}.
      */
     public function __construct(
         protected ChannelResolver $resolver,
-        protected MembershipCounter $counter,
+        MembershipCounter|AppScopedMembershipCounter|null $counter = null,
     ) {
-        //
+        $this->counter = $counter ?? $this->boundCounter();
+    }
+
+    /**
+     * The counter bound under the `MembershipCounter::class` key.
+     */
+    protected function boundCounter(): MembershipCounter|AppScopedMembershipCounter
+    {
+        // The key may hold either contract, whatever its name suggests.
+        /** @var mixed $counter */
+        $counter = app(MembershipCounter::class);
+
+        if (! $counter instanceof MembershipCounter && ! $counter instanceof AppScopedMembershipCounter) {
+            throw new \InvalidArgumentException(sprintf(
+                'The %s binding must implement %s or %s, %s given.',
+                MembershipCounter::class,
+                MembershipCounter::class,
+                AppScopedMembershipCounter::class,
+                get_debug_type($counter),
+            ));
+        }
+
+        return $counter;
+    }
+
+    /**
+     * The live member count of one application's channel.
+     *
+     * An {@see AppScopedMembershipCounter} gets the application id; a legacy
+     * {@see MembershipCounter} gets only the channel name, so two applications
+     * sharing a channel name share its count.
+     */
+    protected function memberCount(string $appId, string $channel): int
+    {
+        return $this->counter instanceof AppScopedMembershipCounter
+            ? $this->counter->count($appId, $channel)
+            : $this->counter->count($channel);
     }
 
     /**
@@ -56,12 +103,18 @@ class EventHandler
     {
         $channel = $event['channel'] ?? null;
 
-        if (! is_string($channel) || ! $this->meters($channel)) {
+        if (! is_string($channel)) {
             return;
         }
 
         $at = Carbon::createFromTimestampMs($timeMs);
         $name = $event['name'] ?? null;
+
+        if (! $this->meters($channel)) {
+            $this->closeLeftover($appId, $channel, $name, $timeMs, $at);
+
+            return;
+        }
 
         if ($this->minMembers() <= 1) {
             if (! in_array($name, self::OCCUPANCY_EVENTS, true)) {
@@ -85,10 +138,37 @@ class EventHandler
 
         // The live count can be a network call, so it is read before the
         // channel's mark row is locked rather than while holding it.
-        $memberCount = $this->counter->count($channel);
+        $memberCount = $this->memberCount($appId, $channel);
 
         $this->inOrder($appId, $channel, $timeMs, function () use ($appId, $channel, $at, $memberCount): void {
             $this->evaluate($appId, $channel, $at, $memberCount);
+        });
+    }
+
+    /**
+     * Close a period left open for a channel this package no longer meters.
+     *
+     * A period opened while a channel was metered (for example under
+     * `meter_unmatched_channels`, before it was turned off) would otherwise
+     * never close in room-occupancy mode: its `channel_vacated` is dropped and
+     * the sweep only runs in fully-occupied mode. So a `channel_vacated` for an
+     * unmetered channel still closes an open period through the ordered path.
+     * Without an open period nothing is written, not even a mark row. In
+     * fully-occupied mode the sweep already re-evaluates every open period, so
+     * nothing extra is done there.
+     */
+    protected function closeLeftover(string $appId, string $channel, mixed $name, int $timeMs, Carbon $at): void
+    {
+        if ($name !== 'channel_vacated' || $this->minMembers() > 1) {
+            return;
+        }
+
+        if ($this->openPeriod($appId, $channel) === null) {
+            return;
+        }
+
+        $this->inOrder($appId, $channel, $timeMs, function () use ($appId, $channel, $at): void {
+            $this->close($appId, $channel, $at);
         });
     }
 
@@ -199,7 +279,7 @@ class EventHandler
             $decision = MeterDecision::for(
                 isOpen: true,
                 belowSince: $this->belowSince($period),
-                memberCount: $this->counter->count($period->channel),
+                memberCount: $this->memberCount($period->app_id, $period->channel),
                 minMembers: $this->minMembers(),
                 graceSeconds: $grace,
                 now: $now,
@@ -445,9 +525,15 @@ class EventHandler
      * The Pusher protocol reserves "#" for channels the server owns rather than
      * the application. `webpatser/resonate-users` puts a signed-in connection on
      * "#server-to-user-{id}" so a message can be addressed to a person, and
-     * that channel is a user's session, not a room. A channel matching no
-     * pattern is still recorded, so without this every sign-in would open a
-     * billable period and every sign-off would close one.
+     * that channel is a user's session, not a room. Ignored prefixes are
+     * dropped whatever `meter_unmatched_channels` says.
+     *
+     * A channel that matches no configured pattern is not metered unless
+     * `meter_unmatched_channels` is true. Any client can occupy a public
+     * channel of any name, so metering every unmatched channel lets an
+     * unauthenticated client create period and mark rows without bound. The
+     * check runs before the mark row is created, so a dropped channel leaves
+     * no row behind.
      */
     protected function meters(string $channel): bool
     {
@@ -463,7 +549,11 @@ class EventHandler
             }
         }
 
-        return true;
+        if ((bool) config('resonate-channel-meter.meter_unmatched_channels', false)) {
+            return true;
+        }
+
+        return $this->resolver->resolve($channel) !== null;
     }
 
     /**

@@ -17,8 +17,8 @@ return [
     | which is stored on the recorded period so a model can pull its periods
     | back out with the `HasChannelMeter` trait.
     |
-    | A channel that matches no pattern is still recorded; it just has no
-    | model attached.
+    | A channel that matches no pattern is not metered unless
+    | `meter_unmatched_channels` below is true.
     |
     | Supported placeholders: `{id}` (a single capture group).
     |
@@ -28,6 +28,27 @@ return [
         // 'presence-chat.{id}' => App\Models\Chat::class,
         // 'presence-call.{id}' => App\Models\Call::class,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Meter unmatched channels
+    |--------------------------------------------------------------------------
+    |
+    | When false (the default), events for a channel that matches none of the
+    | patterns above are dropped before they reach the store: no period and
+    | no high-water mark row is written for it. Any client can occupy a
+    | public channel of any name, so metering every channel would let an
+    | unauthenticated client create rows without bound. One exception: in
+    | room-occupancy mode a `channel_vacated` still closes a period that is
+    | already open for the channel (left over from when it was metered).
+    |
+    | Set it to true to meter every channel that is not ignored by
+    | `ignore_channel_prefixes`, recording a period with no model attached
+    | when no pattern matches. This was the behaviour before this key existed.
+    |
+    */
+
+    'meter_unmatched_channels' => (bool) env('CHANNEL_METER_UNMATCHED_CHANNELS', false),
 
     /*
     |--------------------------------------------------------------------------
@@ -61,10 +82,11 @@ return [
     | The Pusher protocol reserves "#" for channels the server owns rather than
     | the application. webpatser/resonate-users puts a signed-in connection on
     | "#server-to-user-{id}" so a message can be addressed to a person; that is
-    | a user's session, not a room. A channel matching no pattern is still
-    | recorded, so without this every sign-in would open a billable period.
+    | a user's session, not a room. These prefixes are dropped even when
+    | `meter_unmatched_channels` is true, and even when a pattern matches.
     |
-    | Set it to an empty array to meter everything.
+    | Set it to an empty array (together with `meter_unmatched_channels` set
+    | to true) to meter everything.
     |
     */
 

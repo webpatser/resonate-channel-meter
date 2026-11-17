@@ -2,23 +2,23 @@
 
 namespace Webpatser\ResonateChannelMeter\Tests\Support;
 
-use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
+use Webpatser\ResonateChannelMeter\Contracts\AppScopedMembershipCounter;
 
 /**
- * A test double whose per-channel member count the test drives directly.
+ * An app-scoped test double whose per-application, per-channel member count the test drives directly.
  */
-class FakeMembershipCounter implements MembershipCounter
+class FakeMembershipCounter implements AppScopedMembershipCounter
 {
-    /** @var array<string, int> */
+    /** @var array<string, array<string, int>> */
     public array $counts = [];
 
-    public function set(string $channel, int $count): void
+    public function set(string $channel, int $count, string $appId = 'app-id'): void
     {
-        $this->counts[$channel] = $count;
+        $this->counts[$appId][$channel] = $count;
     }
 
-    public function count(string $channel): int
+    public function count(string $appId, string $channel): int
     {
-        return $this->counts[$channel] ?? 0;
+        return $this->counts[$appId][$channel] ?? 0;
     }
 }
