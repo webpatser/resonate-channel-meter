@@ -22,7 +22,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon $started_at
  * @property ?Carbon $ended_at
  * @property ?int $open_slot 1 while open, null once closed: the nullable half of the one-open-period-per-channel unique index
- * @property ?int $last_event_ms the newest event `time_ms` applied to this channel
+ * @property ?int $last_event_ms no longer written: the newest applied event `time_ms` now lives in `channel_meter_marks`
  * @property ?array<string, mixed> $metadata
  */
 class ChannelMeterPeriod extends Model
