@@ -42,7 +42,20 @@ The `channel_meter_periods` table carries a polymorphic `model_type` / `model_id
 ],
 ```
 
-`presence-chat.42` resolves to `(Chat::class, '42')`, and the period is stored with that link. A channel that matches no pattern is still recorded with the channel name; it just has no model attached. Swap the default `ConfigChannelResolver` for your own by binding `ChannelResolver::class` in a service provider if you need richer rules (tenants, composite keys, lookups).
+`presence-chat.42` resolves to `(Chat::class, '42')`, and the period is stored with that link.
+
+Only channels that match a pattern are metered. Events for any other channel are dropped before they reach the store, so no period and no `channel_meter_marks` row is written for them. Any client can occupy a public channel of any name, so metering every channel would let an unauthenticated client create rows without bound. To meter every channel anyway (the behaviour before `meter_unmatched_channels` existed), set:
+
+```php
+// config/resonate-channel-meter.php
+'meter_unmatched_channels' => true, // or CHANNEL_METER_UNMATCHED_CHANNELS=true
+```
+
+An unmatched channel is then recorded with the channel name and no model attached. `ignore_channel_prefixes` still applies either way.
+
+A fresh install with no patterns configured meters nothing. A pattern that matches public channels (for example `'news.{id}'`) still lets an unauthenticated client create one period per channel name it occupies, so prefer patterns on `private-` and `presence-` channels, which need authorisation to join.
+
+Swap the default `ConfigChannelResolver` for your own by binding `ChannelResolver::class` in a service provider if you need richer rules (tenants, composite keys, lookups).
 
 ### Models pull their own periods
 
@@ -119,21 +132,30 @@ while the channel is **fully occupied**, for example billing a two-party
 reading only while both the customer and the consultant are present.
 
 In this mode every membership event re-evaluates the live member count, so the
-package needs a way to read it. Bind a `MembershipCounter`; the shipped
+package needs a way to read it. Bind an `AppScopedMembershipCounter` under the
+`MembershipCounter::class` key; its `count()` receives the application id and
+the channel name, and must count only that application's members, since two
+applications can use the same channel name. The shipped
 `NullMembershipCounter` always returns 0, so a host that uses
 `webpatser/resonate-roster` typically binds a small adapter over its roster:
 
 ```php
+use Webpatser\ResonateChannelMeter\Contracts\AppScopedMembershipCounter;
 use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
 use Webpatser\ResonateRoster\RoomRoster;
 
-$this->app->singleton(MembershipCounter::class, fn () => new class implements MembershipCounter {
-    public function count(string $channel): int
+$this->app->singleton(MembershipCounter::class, fn () => new class implements AppScopedMembershipCounter {
+    public function count(string $appId, string $channel): int
     {
-        return (new RoomRoster(config('resonate-roster')))->userCount($channel);
+        return (new RoomRoster(config('resonate-roster')))->userCount($channel, $appId);
     }
 });
 ```
+
+A counter written against the 1.x `MembershipCounter` contract, whose
+`count(string $channel)` gets only the channel name, still works under the same
+key. It cannot tell applications apart, so two applications that use the same
+channel name share one count.
 
 `grace_seconds` keeps the period open for a window after the count drops below
 the threshold, closing it at `dropped-below + grace` only if the count does not
@@ -157,8 +179,9 @@ persists the same close durably.
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `patterns` | `[]` | Channel-to-model patterns. Each maps a channel-name shape with a `{id}` placeholder to an Eloquent model class. |
-| `min_members` | `1` | Members required to keep a period open. `<= 1` is room occupancy; `>= 2` is fully-occupied metering driven by the `MembershipCounter`. |
-| `ignore_channel_prefixes` | `['#']` | Channel prefixes never metered. The protocol reserves `#` for channels the server owns, such as the `#server-to-user-{id}` channels `webpatser/resonate-users` creates; a channel matching no pattern is still recorded, so without this a sign-in would open a billable period. |
+| `meter_unmatched_channels` | `false` | Whether a channel matching no pattern is metered. `false` drops its events; `true` records a period with no model attached. Env: `CHANNEL_METER_UNMATCHED_CHANNELS`. |
+| `min_members` | `1` | Members required to keep a period open. `<= 1` is room occupancy; `>= 2` is fully-occupied metering driven by the counter bound under `MembershipCounter::class`. |
+| `ignore_channel_prefixes` | `['#']` | Channel prefixes never metered. The protocol reserves `#` for channels the server owns, such as the `#server-to-user-{id}` channels `webpatser/resonate-users` creates. Applied before patterns and `meter_unmatched_channels`, so a channel with one of these prefixes is never metered. |
 | `grace_seconds` | `0` | How long an open period survives below the threshold before closing at `dropped-below + grace`. |
 
 ## Notes and caveats

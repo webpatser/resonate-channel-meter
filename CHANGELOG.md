@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `meter_unmatched_channels` config key (env `CHANNEL_METER_UNMATCHED_CHANNELS`, default `false`). Set it to `true` to meter channels that match no pattern, as before.
+- `AppScopedMembershipCounter` contract with `count(string $appId, string $channel): int`, bound under the existing `MembershipCounter::class` key. Fully-occupied metering passes it the event's application id and `channel-meter:sweep` passes each period's `app_id`, so two applications that use the same channel name keep separate counts. `NullMembershipCounter` implements both contracts and returns 0 in either call shape. A counter bound against the unchanged `MembershipCounter` contract keeps working, but it receives only the channel name, so two applications that use the same channel name share one count. See `UPGRADE.md`.
+
+### Changed
+
+- **Breaking:** a channel that matches no configured pattern is no longer metered by default. Its events are dropped before any period or `channel_meter_marks` row is written, so unauthenticated clients occupying arbitrary public channels can no longer create rows without bound. A period already open for such a channel is still closed: in room-occupancy mode by its next `channel_vacated`, in fully-occupied mode by `channel-meter:sweep`. See `UPGRADE.md`.
+
 ### Fixed
 
 - The out-of-order guard keeps its high-water mark in the new `channel_meter_marks` table (the migration seeds it from existing periods) and checks, applies and marks in one transaction, so a late `channel_occupied` after `channel_vacated` on a fresh channel no longer opens a period that never closes.
