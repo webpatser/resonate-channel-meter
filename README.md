@@ -195,7 +195,7 @@ persists the same close durably.
 
 ## Requirements
 
-- PHP 8.5+
+- PHP 8.6+
 - Laravel 13
 - `webpatser/resonate-webhooks` running against a Resonate server
 

@@ -5,6 +5,14 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-21
+
+### Changed
+
+- **Breaking:** PHP 8.6 or newer is required (`"php": "^8.6"`). PHP 8.5 is no longer supported, and CI runs on 8.6 only.
+- Language pass over `src/` for PHP 8.6: the Carbon `max()`/`min()` calls in `HasChannelMeter` bound two different values (the window start and end), not one clamped value, and the remaining closures capture state, so no `clamp()` or callable rewrite was a clear win. Public API and behaviour are unchanged.
+- Development dependencies: `pestphp/pest` moves to `^5.0` (PHPUnit 13), since Pest 4 cannot be installed on PHP 8.6.
+
 ## [1.1.0] - 2026-11-18
 
 ### Added
