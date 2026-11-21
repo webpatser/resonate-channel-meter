@@ -199,6 +199,10 @@ persists the same close durably.
 - Laravel 13
 - `webpatser/resonate-webhooks` running against a Resonate server
 
+## PHP version policy
+
+This package supports only the latest stable PHP release. When a new PHP version is released, the next release of this package requires it and support for the previous PHP version ends. Currently: PHP 8.6.
+
 ## Testing
 
 ```bash
