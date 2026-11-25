@@ -5,6 +5,14 @@ All notable changes to `webpatser/resonate-channel-meter` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-25
+
+### Added
+
+- Events for every real period transition: `Events\PeriodOpened` (a period row was inserted), `Events\PeriodBelowThreshold` (the `below_since` marker went from unset to set), `Events\PeriodRestored` (a set marker was cleared) and `Events\PeriodClosed` (once per close). Each carries `appId`, `channel`, `periodId`, `modelType`, `modelId` and `at`, the transition moment the handler used; the two grace events add `belowSince`, and `PeriodClosed` adds `startedAt`, `endedAt` and `cause`.
+- `Support\PeriodCloseCause` backed enum: `grace_expired` (membership webhook), `sweep_grace_expired` (`channel-meter:sweep`) and `channel_vacated` (room-occupancy close).
+- Events are dispatched through `DB::afterCommit()`, so nothing fires for a rolled-back transition, a redelivered webhook, an open that lost the insert race or a clear with no marker. A listener that throws is passed to `report()` and never rethrown, so it cannot change a period or the handler's result. Metering decisions, SQL, locks and their order are unchanged; the only added query is a read of the new row after an open that inserted one. See the "Events" section of `README.md`.
+
 ## [1.2.0] - 2026-11-21
 
 ### Changed

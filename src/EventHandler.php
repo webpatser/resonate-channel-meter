@@ -2,14 +2,22 @@
 
 namespace Webpatser\ResonateChannelMeter;
 
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Throwable;
 use Webpatser\ResonateChannelMeter\Contracts\AppScopedMembershipCounter;
 use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
+use Webpatser\ResonateChannelMeter\Events\PeriodBelowThreshold;
+use Webpatser\ResonateChannelMeter\Events\PeriodClosed;
+use Webpatser\ResonateChannelMeter\Events\PeriodOpened;
+use Webpatser\ResonateChannelMeter\Events\PeriodRestored;
 use Webpatser\ResonateChannelMeter\Resolvers\ChannelResolver;
 use Webpatser\ResonateChannelMeter\Support\MeterAction;
 use Webpatser\ResonateChannelMeter\Support\MeterDecision;
+use Webpatser\ResonateChannelMeter\Support\PeriodCloseCause;
 
 /**
  * Applies one Pusher webhook event to the channel-meter store.
@@ -29,6 +37,12 @@ use Webpatser\ResonateChannelMeter\Support\MeterDecision;
  * locked read inside a transaction, and deliveries that arrive out of order are
  * dropped against the channel's high-water mark in `channel_meter_marks`, whose
  * row is locked for the whole check, apply and mark of each event.
+ *
+ * Each real transition dispatches one event ({@see PeriodOpened},
+ * {@see PeriodBelowThreshold}, {@see PeriodRestored}, {@see PeriodClosed})
+ * after the outermost transaction commits. A rolled-back transition dispatches
+ * nothing, and a listener that throws is reported, never rethrown, so it
+ * cannot change a period or the handler's result.
  */
 class EventHandler
 {
@@ -286,9 +300,9 @@ class EventHandler
             );
 
             match ($decision->action) {
-                MeterAction::MarkBelowSince => $this->setBelowSince($period, $now),
-                MeterAction::ClearBelowSince => $this->setBelowSince($period, null),
-                MeterAction::ClosePeriod => $this->closePeriod($period, $decision->endedAt ?? $now),
+                MeterAction::MarkBelowSince => $this->changeBelowSince($period, $now, $now),
+                MeterAction::ClearBelowSince => $this->changeBelowSince($period, null, $now),
+                MeterAction::ClosePeriod => $this->closePeriodBecause($period, $decision->endedAt ?? $now, PeriodCloseCause::SweepGraceExpired),
                 MeterAction::OpenPeriod, MeterAction::NoOp => null,
             };
 
@@ -321,9 +335,9 @@ class EventHandler
 
             match ($decision->action) {
                 MeterAction::OpenPeriod => $this->open($appId, $channel, $at),
-                MeterAction::MarkBelowSince => $this->setBelowSince($open, $at),
-                MeterAction::ClearBelowSince => $this->setBelowSince($open, null),
-                MeterAction::ClosePeriod => $this->closePeriod($open, $decision->endedAt ?? $at),
+                MeterAction::MarkBelowSince => $this->changeBelowSince($open, $at, $at),
+                MeterAction::ClearBelowSince => $this->changeBelowSince($open, null, $at),
+                MeterAction::ClosePeriod => $this->closePeriodBecause($open, $decision->endedAt ?? $at, PeriodCloseCause::GraceExpired),
                 MeterAction::NoOp => null,
             };
         });
@@ -349,7 +363,7 @@ class EventHandler
             $resolved = $this->resolver->resolve($channel);
             $now = Carbon::now();
 
-            ChannelMeterPeriod::query()->insertOrIgnore([
+            $inserted = ChannelMeterPeriod::query()->insertOrIgnore([
                 'app_id' => $appId,
                 'channel' => $channel,
                 'model_type' => $resolved['type'] ?? null,
@@ -359,7 +373,50 @@ class EventHandler
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+
+            // Only the delivery whose row landed announces it; the one that
+            // lost the unique-index race inserted nothing and stays silent.
+            if ($inserted > 0) {
+                $this->announceOpened($appId, $channel, $at);
+            }
         });
+    }
+
+    /**
+     * Dispatch {@see PeriodOpened} for the period this delivery just inserted.
+     *
+     * The row is read back directly (not through {@see openPeriod()}) because
+     * `insertOrIgnore` cannot return the new id.
+     */
+    protected function announceOpened(string $appId, string $channel, Carbon $at): void
+    {
+        // Ordered by key, not `started_at`: the row this delivery just
+        // inserted has the highest id for the channel, while two periods
+        // starting in the same second would tie on `started_at`.
+        $period = ChannelMeterPeriod::query()
+            ->where('app_id', $appId)
+            ->where('channel', $channel)
+            ->whereNull('ended_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($period === null) {
+            return;
+        }
+
+        $periodId = (int) $period->getKey();
+        $modelType = $period->model_type;
+        $modelId = $period->model_id === null ? null : (string) $period->model_id;
+        $at = $at->copy();
+
+        $this->dispatchAfterCommit(static fn (): PeriodOpened => new PeriodOpened(
+            appId: $appId,
+            channel: $channel,
+            periodId: $periodId,
+            modelType: $modelType,
+            modelId: $modelId,
+            at: $at,
+        ));
     }
 
     /**
@@ -368,7 +425,7 @@ class EventHandler
     protected function close(string $appId, string $channel, Carbon $at): void
     {
         DB::transaction(function () use ($appId, $channel, $at): void {
-            $this->closePeriod($this->openPeriod($appId, $channel, lock: true), $at);
+            $this->closePeriodBecause($this->openPeriod($appId, $channel, lock: true), $at, PeriodCloseCause::ChannelVacated);
         });
     }
 
@@ -509,6 +566,128 @@ class EventHandler
             'open_slot' => null,
             'metadata' => $metadata === [] ? null : $metadata,
         ]);
+    }
+
+    /**
+     * Set or clear a period's below-threshold marker and announce a real change.
+     *
+     * Writes through {@see setBelowSince()} unchanged, then dispatches
+     * {@see PeriodBelowThreshold} only when the marker went from unset to set
+     * and {@see PeriodRestored} only when a set marker was cleared. Both carry
+     * the marker as stored, so the pair names the same moment.
+     */
+    protected function changeBelowSince(?ChannelMeterPeriod $period, ?Carbon $belowSince, Carbon $at): void
+    {
+        if ($period === null) {
+            return;
+        }
+
+        $previous = $this->belowSince($period);
+
+        $this->setBelowSince($period, $belowSince);
+
+        $current = $this->belowSince($period);
+
+        if (($previous === null) === ($current === null)) {
+            return;
+        }
+
+        $appId = $period->app_id;
+        $channel = $period->channel;
+        $periodId = (int) $period->getKey();
+        $modelType = $period->model_type;
+        $modelId = $period->model_id === null ? null : (string) $period->model_id;
+        $at = $at->copy();
+
+        if ($current !== null) {
+            $this->dispatchAfterCommit(static fn (): PeriodBelowThreshold => new PeriodBelowThreshold(
+                appId: $appId,
+                channel: $channel,
+                periodId: $periodId,
+                modelType: $modelType,
+                modelId: $modelId,
+                at: $at,
+                belowSince: $current,
+            ));
+        } elseif ($previous !== null) {
+            $this->dispatchAfterCommit(static fn (): PeriodRestored => new PeriodRestored(
+                appId: $appId,
+                channel: $channel,
+                periodId: $periodId,
+                modelType: $modelType,
+                modelId: $modelId,
+                at: $at,
+                belowSince: $previous,
+            ));
+        }
+    }
+
+    /**
+     * Close a period through {@see closePeriod()} and announce why.
+     *
+     * The cause comes from the call site because `closePeriod()` cannot tell
+     * a webhook close from a sweep close. Nothing is dispatched when there is
+     * no period or it was already closed.
+     */
+    protected function closePeriodBecause(?ChannelMeterPeriod $period, Carbon $endedAt, PeriodCloseCause $cause): void
+    {
+        if ($period === null) {
+            return;
+        }
+
+        $wasOpen = $period->isOpen();
+
+        $this->closePeriod($period, $endedAt);
+
+        if (! $wasOpen || $period->ended_at === null) {
+            return;
+        }
+
+        $endedAt = $period->ended_at;
+        $startedAt = $period->started_at;
+        $appId = $period->app_id;
+        $channel = $period->channel;
+        $periodId = (int) $period->getKey();
+        $modelType = $period->model_type;
+        $modelId = $period->model_id === null ? null : (string) $period->model_id;
+
+        $this->dispatchAfterCommit(static fn (): PeriodClosed => new PeriodClosed(
+            appId: $appId,
+            channel: $channel,
+            periodId: $periodId,
+            modelType: $modelType,
+            modelId: $modelId,
+            at: $endedAt->copy(),
+            startedAt: $startedAt->copy(),
+            endedAt: $endedAt->copy(),
+            cause: $cause,
+        ));
+    }
+
+    /**
+     * Build and dispatch a period event once the outermost transaction has committed.
+     *
+     * The event is built by `$event` inside the after-commit callback, never
+     * inside the meter's transaction, so nothing about a payload (a host's
+     * date class, a constructor) can roll a transition back. Callers capture
+     * plain values before the commit and the factory only assembles them.
+     *
+     * A rolled-back transition drops the callback, so nothing is announced
+     * for it; outside a transaction it runs at once. A factory or listener
+     * that throws is reported and swallowed: the period row is already
+     * committed and the handler's result must not depend on either.
+     *
+     * @param  Closure(): object  $event
+     */
+    protected function dispatchAfterCommit(Closure $event): void
+    {
+        DB::afterCommit(static function () use ($event): void {
+            try {
+                Event::dispatch($event());
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 
     /**

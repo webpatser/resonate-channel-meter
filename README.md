@@ -174,6 +174,51 @@ For a live in-progress meter, read the open period plus the `metadata.below_sinc
 marker yourself and cap billable time at `below_since + grace`; the sweep then
 persists the same close durably.
 
+## Events
+
+The handler dispatches one Laravel event per real transition of a period, so a
+host can keep an audit trail (why a session was cut off, when a grace window
+started) without polling `channel_meter_periods`:
+
+| Event | When |
+|-------|------|
+| `Events\PeriodOpened` | A period row was inserted. A delivery that finds a period already open, or loses the insert race, dispatches nothing. |
+| `Events\PeriodBelowThreshold` | The `below_since` marker went from unset to set (fully-occupied mode). |
+| `Events\PeriodRestored` | A set `below_since` marker was cleared because the count recovered (fully-occupied mode). A clear with no marker dispatches nothing. |
+| `Events\PeriodClosed` | The handler or the sweep closed a period. Once per close. |
+
+Every event carries `appId`, `channel`, `periodId`, `modelType` and `modelId`
+(both nullable) and `at`, the transition moment the handler used (the webhook
+`time_ms` or the sweep moment), never the wall clock at dispatch.
+`PeriodBelowThreshold` and `PeriodRestored` also carry `belowSince`, the marker as
+stored on the period (whole seconds), so a matching pair names the same moment.
+`PeriodClosed` carries `startedAt`, `endedAt` (as written, clamped to
+`startedAt`; `at` equals it) and `cause`, a `Support\PeriodCloseCause`:
+
+| Cause | Value | Source |
+|-------|-------|--------|
+| `GraceExpired` | `grace_expired` | A membership webhook found the channel under the threshold past its grace deadline. |
+| `SweepGraceExpired` | `sweep_grace_expired` | `channel-meter:sweep` found the channel under the threshold past its grace deadline. |
+| `ChannelVacated` | `channel_vacated` | A `channel_vacated` webhook closed the period (room-occupancy mode). |
+
+Events are dispatched with `DB::afterCommit()`, so they fire only once the
+outermost transaction commits and never for a rolled-back transition. A period
+the host writes or closes itself dispatches nothing. A listener that throws is
+passed to `report()` and swallowed: it cannot change a period or the handler's
+result, and the webhook still answers `200`. Keep listeners cheap or queue
+them, since they run inside the webhook request or the sweep.
+
+```php
+use Webpatser\ResonateChannelMeter\Events\PeriodClosed;
+
+Event::listen(function (PeriodClosed $event): void {
+    logger()->info('meter period closed', [
+        'period' => $event->periodId,
+        'cause' => $event->cause->value,
+    ]);
+});
+```
+
 ## Configuration reference
 
 | Key | Default | Purpose |
