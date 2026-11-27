@@ -27,6 +27,7 @@ class ConfigChannelResolver implements ChannelResolver
     /**
      * Resolve a channel to an Eloquent (class, id) pair, or null.
      */
+    #[\Override]
     public function resolve(string $channel): ?array
     {
         foreach ($this->patterns as $pattern => $type) {

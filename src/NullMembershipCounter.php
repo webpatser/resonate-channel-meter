@@ -19,6 +19,7 @@ use Webpatser\ResonateChannelMeter\Contracts\MembershipCounter;
  */
 final class NullMembershipCounter implements AppScopedMembershipCounter, MembershipCounter
 {
+    #[\Override]
     public function count(string $appIdOrChannel, ?string $channel = null): int
     {
         return 0;

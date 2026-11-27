@@ -36,6 +36,7 @@ class ChannelMeterMark extends Model
      *
      * @return array<string, string>
      */
+    #[\Override]
     protected function casts(): array
     {
         return [

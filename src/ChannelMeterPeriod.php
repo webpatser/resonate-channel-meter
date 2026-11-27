@@ -37,6 +37,7 @@ class ChannelMeterPeriod extends Model
      *
      * @return array<string, string>
      */
+    #[\Override]
     protected function casts(): array
     {
         return [
@@ -54,6 +55,7 @@ class ChannelMeterPeriod extends Model
      * null once closed) and is kept in step here so host code that writes a
      * period directly cannot break the invariant by forgetting it.
      */
+    #[\Override]
     protected static function booted(): void
     {
         static::saving(function (self $period): void {
